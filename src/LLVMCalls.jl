@@ -1,6 +1,7 @@
 module LLVMCalls
 
 using Static: Zero, One, True, False, StaticInt, StaticBool, lt, gt
+using Base: FastMath
 import IfElse: ifelse
 
 using Base: HWReal

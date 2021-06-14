@@ -1,6 +1,6 @@
 
-@inline vzero(::Val{1}, ::Type{T}) where {T<:NativeTypes} = zero(T)
-@inline vzero(::StaticInt{1}, ::Type{T}) where {T<:NativeTypes} = zero(T)
+@inline Base.zero(::Val{1}, ::Type{T}) where {T<:NativeTypes} = zero(T)
+@inline Base.zero(::StaticInt{1}, ::Type{T}) where {T<:NativeTypes} = zero(T)
 @generated function _vzero(::StaticInt{W}, ::Type{T}, ::StaticInt{RS}) where {W,T<:NativeTypes,RS}
   isone(W) && return Expr(:block, Expr(:meta,:inline), Expr(:call, :zero, T))
   if W * sizeof(T) > RS
@@ -77,7 +77,7 @@ end
   end
 end
 @inline _vbroadcast(::StaticInt{W}, m::EVLMask{W}, ::StaticInt{RS}) where {W,RS} = Mask(m)
-@inline vzero(::Union{Val{W},StaticInt{W}}, ::Type{T}) where {W,T} = _vzero(StaticInt{W}(), T, register_size(T))
+@inline Base.zero(::Union{Val{W},StaticInt{W}}, ::Type{T}) where {W,T} = _vzero(StaticInt{W}(), T, register_size(T))
 @inline vbroadcast(::Union{Val{W},StaticInt{W}}, s::T) where {W,T} = _vbroadcast(StaticInt{W}(), s, register_size(T))
 @inline function _vbroadcast(::StaticInt{W}, vu::VecUnroll{N, 1, T, T}, ::StaticInt{RS}) where {W,N,T,RS}
   VecUnroll(fmap(_vbroadcast, StaticInt{W}(), data(vu), StaticInt{RS}()))
@@ -123,8 +123,6 @@ end
 
 @inline Base.one(::Type{Vec{W,T}}) where {W,T} = vbroadcast(Val{W}(), one(T))
 @inline Base.oneunit(::Type{Vec{W,T}}) where {W,T} = vbroadcast(Val{W}(), one(T))
-@inline vzero(::Type{T}) where {T<:Number} = zero(T)
-@inline vzero() = vzero(pick_vector_width(Float64), Float64)
 
 @inline Vec{W,T}(s::Real) where {W,T} = vbroadcast(Val{W}(), T(s))
 @inline Vec{W}(s::T) where {W,T<:NativeTypes} = vbroadcast(Val{W}(), s)

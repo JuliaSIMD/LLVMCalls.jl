@@ -77,45 +77,33 @@ end
 # for (op,f) ∈ [("abs",:abs)]
 # end
 if Base.libllvm_version ≥ v"12"
-  for (op,f,S) ∈ [("smax",:max,:Signed),("smin",:min,:Signed),("umax",:max,:Unsigned),("umin",:min,:Unsigned)]
+  for (op,f,S) ∈ [("smax",:max,:SignedHW),("smin",:min,:SignedHW),("umax",:max,:UnsignedHW),("umin",:min,:UnsignedHW)]
     vf = Symbol(:v,f)
     @eval @generated $vf(v1::Vec{W,T}, v2::Vec{W,T}) where {W, T <: $S} = (TS = JULIA_TYPES[T]; build_llvmcall_expr($op, W, TS, [W, W], [TS, TS]))
     @eval @inline $vf(v1::Vec{W,<:$S}, v2::Vec{W,<:$S}) where {W} = ((v3,v4) = promote(v1,v2); $vf(v3,v4))
   end
-  # TODO: clean this up.
-  @inline vmax(v1::Vec{W,<:Signed}, v2::Vec{W,<:Unsigned}) where {W} = vifelse(v1 > v2, v1, v2)
-  @inline vmin(v1::Vec{W,<:Signed}, v2::Vec{W,<:Unsigned}) where {W} = vifelse(v1 < v2, v1, v2)
-  @inline vmax(v1::Vec{W,<:Unsigned}, v2::Vec{W,<:Signed}) where {W} = vifelse(v1 > v2, v1, v2)
-  @inline vmin(v1::Vec{W,<:Unsigned}, v2::Vec{W,<:Signed}) where {W} = vifelse(v1 < v2, v1, v2)
-else
-  @inline vmax(v1::Vec{W,<:Integer}, v2::Vec{W,<:Integer}) where {W} = vifelse(v1 > v2, v1, v2)
-  @inline vmin(v1::Vec{W,<:Integer}, v2::Vec{W,<:Integer}) where {W} = vifelse(v1 < v2, v1, v2)
 end
-@inline vmax_fast(v1::Vec{W,<:Integer}, v2::Vec{W,<:Integer}) where {W} = vmax(v1, v2)
-@inline vmin_fast(v1::Vec{W,<:Integer}, v2::Vec{W,<:Integer}) where {W} = vmin(v1, v2)
+# TODO: clean this up.
+@inline Base.max(v1::Vec{W,<:IntegerTypesHW}, v2::Vec{W,<:IntegerTypesHW}) where {W} = vifelse(v1 > v2, v1, v2)
+@inline Base.min(v1::Vec{W,<:IntegerTypesHW}, v2::Vec{W,<:IntegerTypesHW}) where {W} = vifelse(v1 < v2, v1, v2)
+
+@inline FastMath.max_fast(v1::Vec{W,<:IntegerTypesHW}, v2::Vec{W,<:IntegerTypesHW}) where {W} = max(v1, v2)
+@inline FastMath.min_fast(v1::Vec{W,<:IntegerTypesHW}, v2::Vec{W,<:IntegerTypesHW}) where {W} = min(v1, v2)
 
 # floating point
-for (op,f) ∈ [("sqrt",:vsqrt),("fabs",:vabs),("floor",:vfloor),("ceil",:vceil),("trunc",:vtrunc),("nearbyint",:vround)#,("roundeven",:roundeven)
+for (op,f) ∈ [("sqrt",:sqrt),("fabs",:abs),("floor",:floor),("ceil",:ceil),("trunc",:trunc),("nearbyint",:round)#,("roundeven",:roundeven)
               ]
   # @eval @generated Base.$f(v1::Vec{W,T}) where {W, T <: Union{Float32,Float64}} = llvmcall_expr($op, W, T, (W,), (T,), "nsz arcp contract afn reassoc")
-  @eval @generated $f(v1::Vec{W,T}) where {W, T <: Union{Float32,Float64}} = (TS = T === Float32 ? :Float32 : :Float64; build_llvmcall_expr($op, W, TS, [W], [TS], "fast"))
+  @eval @generated Base.$f(v1::Vec{W,T}) where {W, T <: Union{Float32,Float64}} = (TS = T === Float32 ? :Float32 : :Float64; build_llvmcall_expr($op, W, TS, [W], [TS], "fast"))
 end
-@inline vsqrt(v::AbstractSIMD{W,T}) where {W,T<:IntegerTypes} = vsqrt(float(v))
-@inline vsqrt(v::FloatingTypes) = Base.sqrt_llvm_fast(v)
-@inline vsqrt(v::Integer) = Base.sqrt_llvm_fast(float(v))
-# @inline roundeven(v::VecUnroll) = VecUnroll(fmap(roundeven, getfield(v,:data)))
-# @generated function Base.round(::Type{Int64}, v1::Vec{W,T}) where {W, T <: Union{Float32,Float64}}
-#     llvmcall_expr("lrint", W, Int64, (W,), (T,), "")
-# end
-# @generated function Base.round(::Type{Int32}, v1::Vec{W,T}) where {W, T <: Union{Float32,Float64}}
-#     llvmcall_expr("lrint", W, Int32, (W,), (T,), "")
-# end
-@inline vtrunc(::Type{I}, v::AbstractSIMD{W,T}) where {W, I<:IntegerTypesHW, T <: NativeTypes} = vconvert(I, v)
-for f ∈ [:vround, :vfloor, :vceil]
-  @eval @inline $f(::Type{I}, v::AbstractSIMD{W,T}) where {W,I<:IntegerTypesHW,T <: NativeTypes} = vconvert(I, $f(v))
+@inline Base.sqrt(v::AbstractSIMD{W,T}) where {W,T<:IntegerTypes} = sqrt(float(v))
+@inline FastMath.sqrt_fast(v::AbstractSIMD) = sqrt(v)
+@inline Base.trunc(::Type{I}, v::AbstractSIMD{W,T}) where {W, I<:IntegerTypesHW, T <: NativeTypes} = convert(I, v)
+for f ∈ [:round, :floor, :ceil]
+  @eval @inline Base.$f(::Type{I}, v::AbstractSIMD{W,T}) where {W,I<:IntegerTypesHW,T <: NativeTypes} = convert(I, $f(v))
 end
-for f ∈ [:vtrunc, :vround, :vfloor, :vceil]
-  @eval @inline $f(v::AbstractSIMD{W,I}) where {W,I<:IntegerTypesHW} = v
+for f ∈ [:trunc, :round, :floor, :ceil]
+  @eval @inline Base.$f(v::AbstractSIMD{W,I}) where {W,I<:IntegerTypesHW} = v
 end
 
 # """
@@ -191,34 +179,33 @@ end
 
 
 for (op,f,fast) ∈ [
-  ("minnum",:vmin,false),("minnum",:vmin_fast,true),
-  ("maxnum",:vmax,false),("maxnum",:vmax_fast,true),
+  ("minnum",:(Base.min),false),("minnum",:(FastMath.min_fast),true),
+  ("maxnum",:(Base.max),false),("maxnum",:(FastMath.max_fast),true),
   ("copysign",:llvm_copysign,true)
-  ]
-  ff = fast_flags(fast)
-  fast && (ff *= " nnan")
+]
+  ff = fast ? "fast" : fast_flags(false)
   @eval @generated function $f(v1::Vec{W,T}, v2::Vec{W,T}) where {W, T <: Union{Float32,Float64}}
     TS = T === Float32 ? :Float32 : :Float64
     build_llvmcall_expr($op, W, TS, [W, W], [TS, TS], $ff)
   end
 end
 @inline _signbit(v::Vec{W, I}) where {W, I<:Signed} = v & Vec{W,I}(typemin(I))
-@inline vcopysign(v1::Vec{W,I}, v2::Vec{W,I}) where {W, I <: Signed} = vifelse(_signbit(v1) == _signbit(v2), v1, -v1)
+@inline Base.copysign(v1::Vec{W,I}, v2::Vec{W,I}) where {W, I <: Signed} = vifelse(_signbit(v1) == _signbit(v2), v1, -v1)
 
-@inline vcopysign(x::Float32, v::Vec{W}) where {W} = vcopysign(vbroadcast(Val{W}(), x), v)
-@inline vcopysign(x::Float64, v::Vec{W}) where {W} = vcopysign(vbroadcast(Val{W}(), x), v)
-@inline vcopysign(x::Float32, v::VecUnroll{N,W,T,V}) where {N,W,T,V} = vcopysign(vbroadcast(Val{W}(), x), v)
-@inline vcopysign(x::Float64, v::VecUnroll{N,W,T,V}) where {N,W,T,V} = vcopysign(vbroadcast(Val{W}(), x), v)
-@inline vcopysign(v::Vec, u::VecUnroll) = VecUnroll(fmap(vcopysign, v, getfield(u, :data)))
-@inline vcopysign(v::Vec{W,T}, x::NativeTypes) where {W,T} = vcopysign(v, Vec{W,T}(x))
-@inline vcopysign(v1::Vec{W,T}, v2::Vec{W}) where {W,T} = vcopysign(v1, convert(Vec{W,T}, v2))
-@inline vcopysign(v1::Vec{W,T}, ::Vec{W,<:Unsigned}) where {W,T} = vabs(v1)
-@inline vcopysign(s::IntegerTypesHW, v::Vec{W}) where {W} = vcopysign(vbroadcast(Val{W}(), s), v)
-@inline vcopysign(v::Vec, s::UnsignedHW) = vabs(v)
-@inline vcopysign(v::VecUnroll, s::UnsignedHW) = vabs(v)
-@inline vcopysign(v::VecUnroll{N,W,T}, s::NativeTypes) where {N,W,T} = VecUnroll(fmap(vcopysign, getfield(v, :data), vbroadcast(Val{W}(), s)))
+@inline Base.copysign(x::Float32, v::Vec{W}) where {W} = copysign(vbroadcast(Val{W}(), x), v)
+@inline Base.copysign(x::Float64, v::Vec{W}) where {W} = copysign(vbroadcast(Val{W}(), x), v)
+@inline Base.copysign(x::Float32, v::VecUnroll{N,W,T,V}) where {N,W,T,V} = copysign(vbroadcast(Val{W}(), x), v)
+@inline Base.copysign(x::Float64, v::VecUnroll{N,W,T,V}) where {N,W,T,V} = copysign(vbroadcast(Val{W}(), x), v)
+@inline Base.copysign(v::Vec, u::VecUnroll) = VecUnroll(fmap(copysign, v, getfield(u, :data)))
+@inline Base.copysign(v::Vec{W,T}, x::NativeTypes) where {W,T} = copysign(v, Vec{W,T}(x))
+@inline Base.copysign(v1::Vec{W,T}, v2::Vec{W}) where {W,T} = copysign(v1, convert(Vec{W,T}, v2))
+@inline Base.copysign(v1::Vec{W,T}, ::Vec{W,<:Unsigned}) where {W,T} = abs(v1)
+@inline Base.copysign(s::IntegerTypesHW, v::Vec{W}) where {W} = copysign(vbroadcast(Val{W}(), s), v)
+@inline Base.copysign(v::Vec, s::UnsignedHW) = vabs(v)
+@inline Base.copysign(v::VecUnroll, s::UnsignedHW) = vabs(v)
+@inline Base.copysign(v::VecUnroll{N,W,T}, s::NativeTypes) where {N,W,T} = VecUnroll(fmap(copysign, getfield(v, :data), vbroadcast(Val{W}(), s)))
 
-for (f, fl) ∈ [(:vmax, :max), (:vmax_fast, :max_fast), (:vmin, :min), (:vmin_fast, :min_fast)]
+for f ∈ [:(Base.max), :(FastMath.max_fast), :(Base.min), :(FastMath.min_fast)]
   @eval begin
     @inline function $f(a::Union{FloatingTypes,Vec{<:Any,<:FloatingTypes}}, b::Union{FloatingTypes,Vec{<:Any,<:FloatingTypes}})
       c, d = promote(a, b)
@@ -234,51 +221,44 @@ for (f, fl) ∈ [(:vmax, :max), (:vmax_fast, :max_fast), (:vmin, :min), (:vmin_f
     end
     @inline $f(v::Vec{W,<:IntegerTypesHW}, s::IntegerTypesHW) where {W} = $f(v, vbroadcast(Val{W}(), s))
     @inline $f(s::IntegerTypesHW, v::Vec{W,<:IntegerTypesHW}) where {W} = $f(vbroadcast(Val{W}(), s), v)
-    @inline $f(a::FloatingTypes, b::FloatingTypes) = Base.FastMath.$fl(a, b)
-    @inline $f(a::Integer, b::Integer) = Base.FastMath.$fl(a, b)
   end
 end
 
 # ternary
+import Base: fma, muladd
 for (op,f,fast) ∈ [
-  ("fma",:vfma,false),("fma",:vfma_fast,true),
-  ("fmuladd",:vfmadd,false),("fmuladd",:vfmadd_fast,true)
-  ]
+  ("fma",:fma,false),("fma",:fma_fast,true),
+  ("fmuladd",:muladd,false),("fmuladd",:vfmadd_fast,true)
+]
   @eval @generated function $f(v1::Vec{W,T}, v2::Vec{W,T}, v3::Vec{W,T}) where {W, T <: FloatingTypes}
     TS = T === Float32 ? :Float32 : :Float64
     # TS = JULIA_TYPES[T]
     build_llvmcall_expr($op, W, TS, [W, W, W], [TS, TS, TS], $(fast_flags(fast)))
   end
 end
-# @inline Base.fma(a::Vec, b::Vec, c::Vec) = vfma(a,b,c)
-# @inline Base.muladd(a::Vec{W,T}, b::Vec{W,T}, c::Vec{W,T}) where {W,T<:FloatingTypes} = vfmadd(a,b,c)
 # Generic fallbacks
-@inline vfma(a::NativeTypes, b::NativeTypes, c::NativeTypes) = fma(a,b,c)
-@inline vfmadd(a::NativeTypes, b::NativeTypes, c::NativeTypes) = muladd(a,b,c)
-@inline vfma_fast(a::NativeTypes, b::NativeTypes, c::NativeTypes) = fma(a,b,c)
-@inline vfmadd_fast(a::Float32, b::Float32, c::Float32) =  Base.FastMath.add_float_fast(Base.FastMath.mul_float_fast(a,b),c)
-@inline vfmadd_fast(a::Float64, b::Float64, c::Float64) =  Base.FastMath.add_float_fast(Base.FastMath.mul_float_fast(a,b),c)
-@inline vfmadd_fast(a::NativeTypes, b::NativeTypes, c::NativeTypes) = Base.FastMath.add_fast(Base.FastMath.mul_fast(a,b),c)
-@inline vfma(a, b, c) = fma(a,b,c)
-@inline vfmadd(a, b, c) = muladd(a,b,c)
-@inline vfma_fast(a, b, c) = fma(a,b,c)
-@inline vfmadd_fast(a, b, c) = Base.FastMath.add_fast(Base.FastMath.mul_fast(a,b),c)
-for f ∈ [:vfma, :vfmadd, :vfma_fast, :vfmadd_fast]
+@inline fma_fast(a::NativeTypes, b::NativeTypes, c::NativeTypes) = fma(a,b,c)
+@inline vfmadd_fast(a::Float32, b::Float32, c::Float32) =  FastMath.add_float_fast(FastMath.mul_float_fast(a,b),c)
+@inline vfmadd_fast(a::Float64, b::Float64, c::Float64) =  FastMath.add_float_fast(FastMath.mul_float_fast(a,b),c)
+@inline vfmadd_fast(a::NativeTypes, b::NativeTypes, c::NativeTypes) = FastMath.add_fast(FastMath.mul_fast(a,b),c)
+@inline fma_fast(a, b, c) = fma(a,b,c)
+@inline vfmadd_fast(a, b, c) = FastMath.add_fast(FastMath.mul_fast(a,b),c)
+for f ∈ [:fma, :muladd, :vfma_fast, :vfmadd_fast]
   @eval @inline function $f(v1::AbstractSIMD{W,T}, v2::AbstractSIMD{W,T}, v3::AbstractSIMD{W,T}) where {W,T <: IntegerTypesHW}
-    vadd(vmul(v1, v2), v3)
+    ((v1 * v2) + v3)
   end
 end
 
-const vmuladd = vfmadd
+const vfmadd = muladd
 @inline vfnmadd(a, b, c) = vfmadd(-a, b, c)
 @inline vfmsub(a, b, c) = vfmadd(a, b, -c)
 @inline vfnmsub(a, b, c) = -vfmadd(a, b, c)
-const vmuladd_fast = vfmadd_fast
-@inline vfnmadd_fast(a, b, c) = vfmadd_fast(Base.FastMath.sub_fast(a), b, c)
-@inline vfmsub_fast(a, b, c) = vfmadd_fast(a, b, Base.FastMath.sub_fast(c))
-@inline vfnmsub_fast(a, b, c) = Base.FastMath.sub_fast(vfmadd_fast(a, b, c))
-@inline vfnmadd_fast(a::Union{Unsigned,AbstractSIMD{<:Any,<:Union{Unsigned,Bit,Bool}}}, b, c) = Base.FastMath.sub_fast(c, Base.FastMath.mul_fast(a,b))
-@inline vfmsub_fast(a, b, c::Union{Unsigned,AbstractSIMD{<:Any,<:Union{Unsigned,Bit,Bool}}}) = Base.FastMath.sub_fast(Base.FastMath.mul_fast(a, b), c)
+# const vfmadd_fast = muladd_fast
+@inline vfnmadd_fast(a, b, c) = vfmadd_fast(FastMath.sub_fast(a), b, c)
+@inline vfmsub_fast(a, b, c) = vfmadd_fast(a, b, FastMath.sub_fast(c))
+@inline vfnmsub_fast(a, b, c) = FastMath.sub_fast(vfmadd_fast(a, b, c))
+@inline vfnmadd_fast(a::Union{Unsigned,AbstractSIMD{<:Any,<:Union{Unsigned,Bit,Bool}}}, b, c) = FastMath.sub_fast(c, FastMath.mul_fast(a,b))
+@inline vfmsub_fast(a, b, c::Union{Unsigned,AbstractSIMD{<:Any,<:Union{Unsigned,Bit,Bool}}}) = FastMath.sub_fast(FastMath.mul_fast(a, b), c)
 # floating vector, integer scalar
 # @generated function Base.:(^)(v1::Vec{W,T}, v2::Int32) where {W, T <: Union{Float32,Float64}}
 #     llvmcall_expr("powi", W, T, (W, 1), (T, Int32), "nsz arcp contract afn reassoc")
@@ -382,13 +362,13 @@ function count_zeros_func(W, I, op, tf = 1)
   llvmcall_expr(decl, instrs, rettypexpr, :(Tuple{$rettypexpr}), vtyp, [vtyp], [:(data(v))])
 end
 # @generated Base.abs(v::Vec{W,I}) where {W, I <: Integer} = count_zeros_func(W, I, "abs", 0)
-@generated vleading_zeros(v::Vec{W,I}) where {W, I <: Integer} = count_zeros_func(W, I, "ctlz")
-@generated vtrailing_zeros(v::Vec{W,I}) where {W, I <: Integer} = count_zeros_func(W, I, "cttz")
+@generated Base.leading_zeros(v::Vec{W,I}) where {W, I <: Integer} = count_zeros_func(W, I, "ctlz")
+@generated Base.trailing_zeros(v::Vec{W,I}) where {W, I <: Integer} = count_zeros_func(W, I, "cttz")
 
 
 
-for (op,f) ∈ [("ctpop", :vcount_ones)]
-  @eval @generated $f(v1::Vec{W,T}) where {W,T} = (TS = JULIA_TYPES[T]; build_llvmcall_expr($op, W, TS, [W], [TS]))
+for (op,f) ∈ [("ctpop", :count_ones)]
+  @eval @generated Base.$f(v1::Vec{W,T}) where {W,T} = (TS = JULIA_TYPES[T]; build_llvmcall_expr($op, W, TS, [W], [TS]))
 end
 
 for (op,f) ∈ [("fshl",:funnel_shift_left),("fshr",:funnel_shift_right)
@@ -428,6 +408,7 @@ end
   a, b = promote_div(_a, _b)
   funnel_shift_right(a, a, b)
 end
+
 
 @inline vfmadd231(a, b, c) = vfmadd(a, b, c)
 @inline vfnmadd231(a, b, c) = vfnmadd(a, b, c)
@@ -538,9 +519,6 @@ Useful for special funcion implementations.
 @inline inv_approx(x) = inv(x)
 @inline inv_approx(v::VecUnroll) = VecUnroll(fmap(inv_approx, getfield(v, :data)))
 
-@inline vinv_fast(v) = vinv(v)
-@inline vinv_fast(v::AbstractSIMD{<:Any,<:Integer}) = vinv_fast(float(v))
-
 if (Sys.ARCH === :x86_64) || (Sys.ARCH === :i686)
   
   function inv_approx_expr(W, @nospecialize(T), hasavx512f, hasavx512vl, hasavx, vector::Bool=true)
@@ -614,7 +592,7 @@ if (Sys.ARCH === :x86_64) || (Sys.ARCH === :i686)
     v⁻¹₂ = vmul_fast(v⁻¹₁, vfnmadd_fast(v, v⁻¹₁, 2.0))
     v⁻¹₃ = vmul_fast(v⁻¹₂, vfnmadd_fast(v, v⁻¹₂, 2.0))
   end
-  @inline _vinv_fast(v, ::False) = vinv(v)
+  @inline _vinv_fast(v, ::False) = inv(v)
   @inline vfdiv_afast(a::VecUnroll{N}, b::VecUnroll{N}, ::False) where {N} = VecUnroll(fmap(vfdiv_fast, getfield(a,:data), getfield(b,:data)))
   @inline vfdiv_afast(a::VecUnroll{N}, b::VecUnroll{N}, ::True) where {N} = VecUnroll(fmap(vfdiv_fast, getfield(a,:data), getfield(b,:data)))
   @inline function vfdiv_afast(a::VecUnroll{N,W,T,Vec{W,T}}, b::VecUnroll{N,W,T,Vec{W,T}}, ::True) where {N,W,T<:FloatingTypes}
