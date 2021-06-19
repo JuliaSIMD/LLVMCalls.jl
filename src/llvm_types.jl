@@ -212,13 +212,12 @@ end
     decl::String, instr::String, ret::Union{Symbol,Expr}, args::Expr, lret::String, largs::Vector{String}, arg_syms::Vector, callonly::Bool = false
     )
     mod = """
-              $decl
-
-              define $lret @entry($(join(largs, ", "))) alwaysinline {
-              top:
-                  $instr
-              }
-          """
+      $decl
+      define $lret @entry($(join(largs, ", "))) alwaysinline {
+      top:
+        $instr
+      }
+    """
     # attributes #0 = { alwaysinline }
     call = Expr(:call, LLVMCALL, (mod::String, "entry")::Tuple{String,String}, ret, args)
     for arg ∈ arg_syms

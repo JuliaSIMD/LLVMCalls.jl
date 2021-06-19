@@ -82,7 +82,7 @@ for f ∈ [:vne, :veq] # Here we truncate.
   @eval @inline $f(a::Vec{W,Bool}, b::Vec{W,Bool}) where {W} = convert(Bool, $f(convert(Bit, a), convert(Bit, b)))
 end
 
-@generated function vconvert(::Type{Vec{W,I}}, m::AbstractMask{W,U}) where {W,I<:IntegerTypesHW,U<:Union{UInt8,UInt16,UInt32,UInt64}}
+@generated function Base.convert(::Type{Vec{W,I}}, m::AbstractMask{W,U}) where {W,I<:IntegerTypesHW,U<:Union{UInt8,UInt16,UInt32,UInt64}}
   bits = 8sizeof(I)
   instrs = String[]
   truncate_mask!(instrs, '0', W, 0)
@@ -304,7 +304,7 @@ end
     Mask{$W}($LLVMCALL($(join(instrs, "\n")), $U, Tuple{_Vec{$W,Bool}}, data(v)))
   end
 end
-@inline tomask(v::AbstractSIMDVector{W,Bool}) where {W} = tomask(vconvert(Vec{W,Bool}, data(v)))
+@inline tomask(v::AbstractSIMDVector{W,Bool}) where {W} = tomask(convert(Vec{W,Bool}, data(v)))
 # @inline tounsigned(m::Mask) = getfield(m, :u)
 # @inline tounsigned(m::Vec{W,Bool}) where {W} = getfield(tomask(m), :u)
 @inline tounsigned(v) = getfield(tomask(v), :u)
@@ -414,17 +414,17 @@ for (f,cond) ∈ [(:veq, "oeq"), (:vgt, "ogt"), (:vge, "oge"), (:vlt, "olt"), (:
 end
 
 @inline function vgt(v1::AbstractSIMDVector{W,S}, v2::AbstractSIMDVector{W,U}) where {W,S<:SignedHW,U<:UnsignedHW}
-  (v1 > zero(S)) & (vconvert(U, v1) > v2)
+  (v1 > zero(S)) & (convert(U, v1) > v2)
 end
 @inline function vgt(v1::AbstractSIMDVector{W,U}, v2::AbstractSIMDVector{W,S}) where {W,S<:SignedHW,U<:UnsignedHW}
-  (v2 < zero(S)) | (vconvert(S, v1) > v2)
+  (v2 < zero(S)) | (convert(S, v1) > v2)
 end
 
 @inline function vge(v1::AbstractSIMDVector{W,S}, v2::AbstractSIMDVector{W,U}) where {W,S<:SignedHW,U<:UnsignedHW}
-  (v1 ≥ zero(S)) & (vconvert(U, v1) ≥ v2)
+  (v1 ≥ zero(S)) & (convert(U, v1) ≥ v2)
 end
 @inline function vge(v1::AbstractSIMDVector{W,U}, v2::AbstractSIMDVector{W,S}) where {W,S<:SignedHW,U<:UnsignedHW}
-  (v2 < zero(S)) | (vconvert(S, v1) ≥ v2)
+  (v2 < zero(S)) | (convert(S, v1) ≥ v2)
 end
 
 @inline vlt(v1::AbstractSIMDVector{W,S}, v2::AbstractSIMDVector{W,U}) where {W,S<:SignedHW,U<:UnsignedHW} = vgt(v2, v1)
@@ -452,7 +452,7 @@ for (op,f) ∈ [(:veq,:(==)), (:vne,:(≠))]
   end
 end
 
-@generated function vifelse(m::AbstractMask{W,U}, v1::Vec{W,T}, v2::Vec{W,T}) where {W,U,T}
+@generated function ifelse(m::AbstractMask{W,U}, v1::Vec{W,T}, v2::Vec{W,T}) where {W,U,T}
   typ = LLVM_TYPES[T]
   vtyp = vtype(W, typ)
   selty = vtype(W, "i1")
@@ -469,29 +469,29 @@ end
   end
 end
 
-@inline vifelse(m::Vec{W,Bool}, s1::T, s2::T) where {W,T<:NativeTypes} = vifelse(m, Vec{W,T}(s1), Vec{W,T}(s2))
-@inline vifelse(m::AbstractMask{W}, s1::T, s2::T) where {W,T<:NativeTypes} = vifelse(m, Vec{W,T}(s1), Vec{W,T}(s2))
-@inline vifelse(m::AbstractMask{W,U}, s1, s2) where {W,U} = ((x1,x2) = promote(s1,s2); vifelse(m, x1, x2))
-@inline vifelse(m::AbstractMask{W}, v1::VecUnroll{N,W}, v2::VecUnroll{N,W}) where {N,W} = VecUnroll(fmap(vifelse, m, getfield(v1, :data), getfield(v2, :data)))
+@inline ifelse(m::Vec{W,Bool}, s1::T, s2::T) where {W,T<:NativeTypes} = ifelse(m, Vec{W,T}(s1), Vec{W,T}(s2))
+@inline ifelse(m::AbstractMask{W}, s1::T, s2::T) where {W,T<:NativeTypes} = ifelse(m, Vec{W,T}(s1), Vec{W,T}(s2))
+@inline ifelse(m::AbstractMask{W,U}, s1, s2) where {W,U} = ((x1,x2) = promote(s1,s2); ifelse(m, x1, x2))
+@inline ifelse(m::AbstractMask{W}, v1::VecUnroll{N,W}, v2::VecUnroll{N,W}) where {N,W} = VecUnroll(fmap(ifelse, m, getfield(v1, :data), getfield(v2, :data)))
 
 @inline Base.Bool(m::AbstractMask{1,UInt8}) = (getfield(m, :u) & 0x01) === 0x01
-@inline vconvert(::Type{Bool}, m::AbstractMask{1,UInt8}) = (getfield(m, :u) & 0x01) === 0x01
-@inline vifelse(m::AbstractMask{1}, s1::T, s2::T) where {T<:NativeTypes} = Base.ifelse(Bool(m), s1, s2)
-@inline vifelse(f::F, m::AbstractSIMD{W,B}, a::Vararg{NativeTypesV,K}) where {F<:Function,K,W,B<:Union{Bool,Bit}} = vifelse(m, f(a...), a[K])
-@inline vifelse(f::F, m::Bool, a::Vararg{NativeTypesV,K}) where {F<:Function,K} = ifelse(m, f(a...), a[K])
+@inline Base.convert(::Type{Bool}, m::AbstractMask{1,UInt8}) = (getfield(m, :u) & 0x01) === 0x01
+@inline ifelse(m::AbstractMask{1}, s1::T, s2::T) where {T<:NativeTypes} = Base.ifelse(Bool(m), s1, s2)
+@inline ifelse(f::F, m::AbstractSIMD{W,B}, a::Vararg{NativeTypesV,K}) where {F<:Function,K,W,B<:Union{Bool,Bit}} = ifelse(m, f(a...), a[K])
+@inline ifelse(f::F, m::Bool, a::Vararg{NativeTypesV,K}) where {F<:Function,K} = ifelse(m, f(a...), a[K])
 
-@inline vconvert(::Type{EVLMask{W,U}}, b::Bool) where {W,U} = b & max_mask(StaticInt{W}())
+@inline Base.convert(::Type{EVLMask{W,U}}, b::Bool) where {W,U} = b & max_mask(StaticInt{W}())
 
-@inline vifelse(m::AbstractMask{W}, a::AbstractMask{W}, b::AbstractMask{W}) where {W} = bitselect(m,b,a)
+@inline ifelse(m::AbstractMask{W}, a::AbstractMask{W}, b::AbstractMask{W}) where {W} = bitselect(m,b,a)
 
 @inline Base.isnan(v::AbstractSIMD) = v != v
 @inline Base.isfinite(x::AbstractSIMD) = iszero(x - x)
 
-@inline Base.flipsign(x::AbstractSIMD, y::AbstractSIMD) = vifelse(y > zero(y), x, -x)
+@inline Base.flipsign(x::AbstractSIMD, y::AbstractSIMD) = ifelse(y > zero(y), x, -x)
 for T ∈ [:Float32, :Float64]
   @eval begin
-    @inline Base.flipsign(x::AbstractSIMD, y::$T) = vifelse(y > zero(y), x, -x)
-    @inline Base.flipsign(x::$T, y::AbstractSIMD) = vifelse(y > zero(y), x, -x)
+    @inline Base.flipsign(x::AbstractSIMD, y::$T) = ifelse(y > zero(y), x, -x)
+    @inline Base.flipsign(x::$T, y::AbstractSIMD) = ifelse(y > zero(y), x, -x)
   end
 end
 @inline Base.flipsign(x::AbstractSIMD, y::Real) = ifelse(y > zero(y), x, -x)
@@ -500,7 +500,7 @@ end
 @inline Base.isodd(x::AbstractSIMD{W,T}) where {W,T<:Integer} = (x & one(T)) != zero(T)
 
 
-@generated function vifelse(m::Vec{W,Bool}, v1::Vec{W,T}, v2::Vec{W,T}) where {W,T}
+@generated function ifelse(m::Vec{W,Bool}, v1::Vec{W,T}, v2::Vec{W,T}) where {W,T}
   typ = LLVM_TYPES[T]
   vtyp = vtype(W, typ)
   selty = vtype(W, "i1")
@@ -515,27 +515,29 @@ end
     Vec($LLVMCALL($(join(instrs,"\n")), _Vec{$W,$T}, Tuple{_Vec{$W,Bool},_Vec{$W,$T},_Vec{$W,$T}}, data(m), data(v1), data(v2)))
   end
 end
-@inline vifelse(b::Bool, w, x) = ((y,z) = promote(w,x); vifelse(b, y, z))
-@inline vifelse(b::Bool, w::T, x::T) where {T<:Union{NativeTypes,AbstractSIMDVector}} = Core.ifelse(b, w, x)
-@inline vifelse(b::Bool, w::T, x::T) where {T<:VecUnroll} = VecUnroll(fmap(Core.ifelse, b, getfield(w, :data), getfield(x, :data)))
+@inline ifelse(b::Bool, w, x) = ((y,z) = promote(w,x); ifelse(b, y, z))
+@inline ifelse(b::Bool, w::T, x::T) where {T<:Union{NativeTypes,AbstractSIMDVector}} = Core.ifelse(b, w, x)
+@inline ifelse(b::Bool, w::T, x::T) where {T<:VecUnroll} = VecUnroll(fmap(Core.ifelse, b, getfield(w, :data), getfield(x, :data)))
 
-@generated function vifelse(m::AbstractMask{W}, vu1::VecUnroll{Nm1,Wsplit}, vu2::VecUnroll{Nm1,Wsplit}) where {W,Wsplit,Nm1}
+@generated function ifelse(m::AbstractMask{W}, vu1::VecUnroll{Nm1,Wsplit}, vu2::VecUnroll{Nm1,Wsplit}) where {W,Wsplit,Nm1}
   N = Nm1 + 1
   @assert N * Wsplit == W
   U = mask_type_symbol(Wsplit)
   quote
     $(Expr(:meta,:inline))
-    vifelse(vconvert(VecUnroll{$Nm1,$Wsplit,Bit,Mask{$Wsplit,$U}}, m), vu1, vu2)
+    ifelse(convert(VecUnroll{$Nm1,$Wsplit,Bit,Mask{$Wsplit,$U}}, m), vu1, vu2)
   end
 end
 
-@inline vmul(v::AbstractSIMDVector, m::AbstractMask) = vifelse(m, v, zero(v))
-@inline vmul(m::AbstractMask, v::AbstractSIMDVector) = vifelse(m, v, zero(v))
-@inline vmul(m1::AbstractMask, m2::AbstractMask) = m1 & m2
-@inline vmul(v::AbstractSIMDVector, b::Bool) = b ? v : zero(v)
-@inline vmul(b::Bool, v::AbstractSIMDVector) = b ? v : zero(v)
-@inline vmul(v::VecUnroll{N,W,T}, b::Bool) where {N,W,T} = b ? v : zero(v)
-@inline vmul(b::Bool, v::VecUnroll{N,W,T}) where {N,W,T} = b ? v : zero(v)
+@inline Base.:(*)(v::AbstractSIMDVector, m::AbstractMask) = ifelse(m, v, zero(v))
+@inline Base.:(*)(m::AbstractMask, v::AbstractSIMDVector) = ifelse(m, v, zero(v))
+@inline FastMath.mul_fast(v::AbstractSIMDVector, m::AbstractMask) = ifelse(m, v, zero(v))
+@inline FastMath.mul_fast(m::AbstractMask, v::AbstractSIMDVector) = ifelse(m, v, zero(v))
+@inline Base.:(*)(m1::AbstractMask, m2::AbstractMask) = m1 & m2
+@inline Base.:(*)(v::AbstractSIMDVector, b::Bool) = b ? v : zero(v)
+@inline Base.:(*)(b::Bool, v::AbstractSIMDVector) = b ? v : zero(v)
+@inline Base.:(*)(v::VecUnroll{N,W,T}, b::Bool) where {N,W,T} = b ? v : zero(v)
+@inline Base.:(*)(b::Bool, v::VecUnroll{N,W,T}) where {N,W,T} = b ? v : zero(v)
 
 
 

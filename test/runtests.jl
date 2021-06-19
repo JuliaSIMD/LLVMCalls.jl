@@ -7,7 +7,7 @@ include("testsetup.jl")
 
 @testset "LLVMCalls.jl" begin
 
-  if false
+  if true
   
   println("Binary Functions")
   @time @testset "Binary Functions" begin
